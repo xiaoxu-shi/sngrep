@@ -105,6 +105,7 @@ capture_deinit()
 int
 capture_online(const char *dev, const char *outfile)
 {
+    int status;
     capture_info_t *capinfo;
 
     //! Error string
@@ -122,12 +123,43 @@ capture_online(const char *dev, const char *outfile)
         capinfo->mask = 0;
     }
 
-    // Open capture device
-    capinfo->handle = pcap_open_live(dev, MAXIMUM_SNAPLEN, 1, 1000, errbuf);
+    // Create handle for device capture
+    capinfo->handle = pcap_create(dev, errbuf);
     if (capinfo->handle == NULL) {
         fprintf(stderr, "Couldn't open device %s: %s\n", dev, errbuf);
         return 2;
     }
+
+    status = pcap_set_promisc(capinfo->handle, 1);
+    if (status != 0) {
+        fprintf(stderr, "Error setting promisc mode on %s: %s\n",
+                dev, pcap_statustostr(status));
+        return 2;
+    }
+
+    status = pcap_set_timeout(capinfo->handle, 1000);
+    if (status != 0) {
+        fprintf(stderr, "Error setting capture timeout on %s: %s\n",
+                dev, pcap_statustostr(status));
+        return 2;
+    }
+
+    status = pcap_set_snaplen(capinfo->handle, MAXIMUM_SNAPLEN);
+    if (status != 0) {
+        fprintf(stderr, "Error setting snaplen on %s: %s\n",
+                dev, pcap_statustostr(status));
+        return 2;
+    }
+
+    status = pcap_set_buffer_size(capinfo->handle, MAXIMUM_BUFFERSIZE);
+    if (status != 0) {
+        fprintf(stderr, "Error setting buffer size on %s: %s\n",
+            dev, pcap_statustostr(status));
+        return 2;
+    }
+
+    // Start capturing packets
+    pcap_activate(capinfo->handle);
 
     // Store capture device
     capinfo->device = dev;

@@ -86,6 +86,8 @@
 #define MAX_CAPTURE_LEN 20480
 //! Max allowed packet length
 #define MAXIMUM_SNAPLEN 262144
+//! Max allowed packet length
+#define MAXIMUM_BUFFERSIZE 524288
 
 //! Define VLAN 802.1Q Ethernet type
 #ifndef ETHERTYPE_8021Q
