@@ -44,6 +44,7 @@
 
 #include <glib.h>
 #include <glib-object.h>
+#include <gio/gio.h>
 #include "capture.h"
 #include "capture_input.h"
 #include "capture_output.h"
@@ -81,11 +82,11 @@ typedef struct _CaptureHepUrl CaptureHepUrl;
 struct _CaptureHepUrl
 {
     //! Protocol
-    const gchar *proto;
+    GSocketProtocol proto;
     //! IP address to send/receive HEP data
     const gchar *host;
     //! Port to send/receive HEP data
-    const gchar *port;
+    guint port;
 };
 
 /**
@@ -95,12 +96,12 @@ struct _CaptureInputHep
 {
     //! Parent object attributes
     CaptureInput parent;
-    //! Client/Server socket
-    gint socket;
+    //! Server socket
+    GSocket *socket;
     //! Capture agent id
     guint16 id;
     //! Capture connection data
-    struct _CaptureHepUrl url;
+    CaptureHepUrl url;
     //! Hep Version for send/receive data (2 or 3)
     gint version;
     //! Password for authentication
@@ -114,12 +115,12 @@ struct _CaptureOutputHep
 {
     //! Parent object attributes
     CaptureOutput parent;
-    //! Client/Server socket
-    gint socket;
+    //! Client socket
+    GSocket *socket;
     //! Capture agent id
     guint16 id;
     //! Capture connection data
-    struct _CaptureHepUrl url;
+    CaptureHepUrl url;
     //! Hep Version for send/receive data (2 or 3)
     gint version;
     //! Password for authentication

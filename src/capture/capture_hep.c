@@ -41,13 +41,7 @@
  */
 #include "config.h"
 #include <glib.h>
-#include <sys/socket.h>
 #include <arpa/inet.h>
-#include <errno.h>
-#include <netdb.h>
-#include <unistd.h>
-#include <string.h>
-#include <glib-unix.h>
 #include "setting.h"
 #include "parser/packet_hep.h"
 #include "parser/packet_ip.h"
@@ -82,18 +76,19 @@ capture_hep_parse_url(const gchar *url_str, CaptureHepUrl *url, GError **error)
     }
 
     // Set capture url data
-    url->proto = g_strdup(tokens[0]);
-    url->host = g_strdup(tokens[1]);
-    url->port = g_strdup(tokens[2]);
-
-    if (g_strcmp0(url->proto, "udp") != 0) {
+    if (g_strcmp0(tokens[0], "udp") == 0) {
+        url->proto = G_SOCKET_PROTOCOL_UDP;
+    } else {
         g_set_error(error,
                     CAPTURE_HEP_ERROR,
                     CAPTURE_HEP_ERROR_URL_PARSE,
                     "Unable to dissect URL %s: Unsupported protocol %s",
-                    url_str, url->proto);
+                    url_str, tokens[0]);
         return FALSE;
     }
+
+    url->host = g_strdup(tokens[1]);
+    url->port = atoi(tokens[2]);
 
     g_strfreev(tokens);
     return TRUE;
@@ -105,13 +100,19 @@ capture_input_hep_receive(G_GNUC_UNUSED gint fd,
                           CaptureInput *input)
 {
     char buffer[MAX_HEP_BUFSIZE];
-    struct sockaddr hep_client;
-    socklen_t hep_client_len;
     CaptureInputHep *hep = CAPTURE_INPUT_HEP(input);
     PacketParser *parser = capture_input_parser(input);
 
     /* Receive HEP generic header */
-    gssize received = recvfrom(hep->socket, buffer, MAX_HEP_BUFSIZE, 0, &hep_client, &hep_client_len);
+    gssize received = g_socket_receive_from(
+        hep->socket,
+        NULL,
+        buffer,
+        MAX_HEP_BUFSIZE,
+        FALSE,
+        NULL
+    );
+
     if (received == -1)
         return FALSE;
 
@@ -140,8 +141,6 @@ capture_input_hep_receive(G_GNUC_UNUSED gint fd,
 CaptureInput *
 capture_input_hep(const gchar *url, GError **error)
 {
-    struct addrinfo *ai, hints[1] = {{ 0 }};
-
     // Create a new structure to handle this capture source
     CaptureInputHep *hep = g_object_new(CAPTURE_TYPE_INPUT_HEP, NULL);
 
@@ -152,9 +151,9 @@ capture_input_hep(const gchar *url, GError **error)
             return NULL;
         }
     } else {
-        hep->url.proto = "udp";
+        hep->url.proto = G_SOCKET_PROTOCOL_UDP;
         hep->url.host = setting_get_value(SETTING_HEP_LISTEN_ADDR);
-        hep->url.port = setting_get_value(SETTING_HEP_LISTEN_PORT);
+        hep->url.port = setting_get_intvalue(SETTING_HEP_LISTEN_PORT);
     }
 
     // Check protocol version is support
@@ -167,43 +166,43 @@ capture_input_hep(const gchar *url, GError **error)
         return NULL;
     }
 
-    hints->ai_flags = AI_NUMERICSERV;
-    hints->ai_family = AF_UNSPEC;
-    hints->ai_socktype = SOCK_DGRAM;
-    hints->ai_protocol = IPPROTO_UDP;
+    GSocketAddress *listen_addr = g_inet_socket_address_new_from_string(
+        hep->url.host,
+        hep->url.port
+    );
 
-    if (getaddrinfo(hep->url.host, hep->url.port, hints, &ai)) {
+    if (listen_addr == NULL) {
         g_set_error(error,
                     CAPTURE_HEP_ERROR,
                     CAPTURE_HEP_ERROR_URL_PARSE,
-                    "HEP: failed getaddrinfo() for %s:%s",
+                    "HEP: failed g_inet_socket_address_new_from_string() for %s:%d",
                     hep->url.host, hep->url.port);
         return NULL;
     }
 
     // Create a socket for a new TCP IPv4 connection
-    hep->socket = socket(AF_INET, SOCK_DGRAM, 0);
-    if (hep->socket < 0) {
-        g_set_error(error,
-                    CAPTURE_HEP_ERROR,
-                    CAPTURE_HEP_ERROR_SOCKET,
-                    "HEP: Error creating server socket: %s",
-                    g_strerror(errno));
+    GError *socket_error = NULL;
+    hep->socket = g_socket_new(
+        G_SOCKET_FAMILY_IPV4,
+        G_SOCKET_TYPE_DATAGRAM,
+        G_SOCKET_PROTOCOL_UDP,
+        &socket_error
+    );
+
+    if (socket_error != NULL) {
+        g_propagate_error(error, socket_error);
         return NULL;
     }
 
     // Bind that socket to the requested address and port
-    if (bind(hep->socket, ai->ai_addr, ai->ai_addrlen) == -1) {
-        g_set_error(error,
-                    CAPTURE_HEP_ERROR,
-                    CAPTURE_HEP_ERROR_BIND,
-                    "HEP: Error binding address: %s",
-                    g_strerror(errno));
+    g_socket_bind(hep->socket, listen_addr, TRUE, &socket_error);
+    if (socket_error != NULL) {
+        g_propagate_error(error, socket_error);
         return NULL;
     }
 
     // Create a new structure to handle this capture source
-    g_autofree gchar *source_str = g_strdup_printf("L:%s", hep->url.port);
+    g_autofree gchar *source_str = g_strdup_printf("L:%d", hep->url.port);
     capture_input_set_source_str(CAPTURE_INPUT(hep), source_str);
     capture_input_set_mode(CAPTURE_INPUT(hep), CAPTURE_MODE_ONLINE);
 
@@ -216,9 +215,10 @@ capture_input_hep(const gchar *url, GError **error)
 
     capture_input_set_source(
         CAPTURE_INPUT(hep),
-        g_unix_fd_source_new(
+        g_socket_create_source(
             hep->socket,
-            G_IO_IN | G_IO_ERR | G_IO_HUP
+            G_IO_IN | G_IO_ERR | G_IO_HUP,
+            FALSE
         )
     );
 
@@ -243,10 +243,8 @@ void
 capture_input_hep_stop(CaptureInput *input)
 {
     CaptureInputHep *hep = CAPTURE_INPUT_HEP(input);
-    if (hep->socket > 0) {
-        close(hep->socket);
-        hep->socket = -1;
-    }
+    g_socket_close(hep->socket, NULL);
+    g_clear_object(&hep->socket);
 }
 
 const char *
@@ -256,7 +254,7 @@ capture_input_hep_port(CaptureManager *manager)
         CaptureInput *input = l->data;
         if (capture_input_tech(input) == CAPTURE_TECH_HEP) {
             CaptureInputHep *hep = CAPTURE_INPUT_HEP(input);
-            return hep->url.port;
+            return g_strdup_printf("%d", hep->url.port);
         }
     }
 
@@ -282,8 +280,6 @@ G_DEFINE_TYPE(CaptureOutputHep, capture_output_hep, CAPTURE_TYPE_OUTPUT)
 CaptureOutput *
 capture_output_hep(const gchar *url, GError **error)
 {
-    struct addrinfo *ai, hints[1] = {{ 0 }};
-
     // Create a new structure to handle this capture sink
     CaptureOutputHep *hep = g_object_new(CAPTURE_TYPE_OUTPUT_HEP, NULL);
 
@@ -296,9 +292,9 @@ capture_output_hep(const gchar *url, GError **error)
             return NULL;
         }
     } else {
-        hep->url.proto = "udp";
+        hep->url.proto = G_SOCKET_PROTOCOL_UDP;
         hep->url.host = setting_get_value(SETTING_HEP_SEND_ADDR);
-        hep->url.port = setting_get_value(SETTING_HEP_SEND_PORT);
+        hep->url.port = setting_get_intvalue(SETTING_HEP_SEND_PORT);
     }
 
     // Check protocol version is support
@@ -311,42 +307,37 @@ capture_output_hep(const gchar *url, GError **error)
         return NULL;
     }
 
-    hints->ai_flags = AI_NUMERICSERV;
-    hints->ai_family = AF_UNSPEC;
-    hints->ai_socktype = SOCK_DGRAM;
-    hints->ai_protocol = IPPROTO_UDP;
+    GSocketAddress *srv_addr = g_inet_socket_address_new_from_string(
+        hep->url.host,
+        hep->url.port
+    );
 
-    if (getaddrinfo(hep->url.host, hep->url.port, hints, &ai)) {
+    if (srv_addr == NULL) {
         g_set_error(error,
                     CAPTURE_HEP_ERROR,
                     CAPTURE_HEP_ERROR_URL_PARSE,
-                    "HEP client: failed getaddrinfo() for %s:%s",
+                    "HEP: failed parser HEP server address from %s:%d",
                     hep->url.host, hep->url.port);
         return NULL;
     }
 
-    hep->socket = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
-    if (hep->socket < 0) {
-        g_set_error(error,
-                    CAPTURE_HEP_ERROR,
-                    CAPTURE_HEP_ERROR_SOCKET,
-                    "Error creating client socket: %s",
-                    g_strerror(errno));
+    // Create a socket for a new TCP IPv4 connection
+    hep->socket = g_socket_new(G_SOCKET_FAMILY_IPV4, G_SOCKET_TYPE_DATAGRAM, G_SOCKET_PROTOCOL_UDP, error);
+    if (hep->socket == NULL) {
+        // Error MUST be set by socket function
+        g_assert (error == NULL || *error != NULL);
+        return NULL;
+
+    }
+
+    // Connect to HEP server
+    if (!g_socket_connect(hep->socket, srv_addr, FALSE, error)) {
+        // Error MUST be set by socket function
+        g_assert (error == NULL || *error != NULL);
         return NULL;
     }
 
-    if (connect(hep->socket, ai->ai_addr, (socklen_t) (ai->ai_addrlen)) == -1) {
-        if (errno != EINPROGRESS) {
-            g_set_error(error,
-                        CAPTURE_HEP_ERROR,
-                        CAPTURE_HEP_ERROR_CONNECT,
-                        "Error connecting: %s",
-                        g_strerror(errno));
-            return NULL;
-        }
-    }
-
-    g_autofree gchar *sink = g_strdup_printf("L:%s", hep->url.port);
+    g_autofree gchar *sink = g_strdup_printf("L:%d", hep->url.port);
     capture_output_set_sink(CAPTURE_OUTPUT(hep), sink);
 
     return CAPTURE_OUTPUT(hep);
@@ -513,7 +504,7 @@ capture_output_hep_write(CaptureOutput *output, Packet *packet)
     g_byte_array_append(data, (gpointer) sip->payload, (guint) strlen(sip->payload));
 
     // Send payload to HEPv3 Server
-    if (send(hep->socket, data->data, data->len, 0) == -1) {
+    if (g_socket_send(hep->socket, (const gchar *)data->data, data->len, FALSE, NULL) == -1) {
         return;
     }
 }
@@ -522,10 +513,8 @@ void
 capture_output_hep_close(CaptureOutput *output)
 {
     CaptureOutputHep *hep = CAPTURE_OUTPUT_HEP(output);
-    if (hep->socket > 0) {
-        close(hep->socket);
-        hep->socket = -1;
-    }
+    g_socket_close(hep->socket, NULL);
+    g_clear_object(&hep->socket);
 }
 
 const gchar *
@@ -535,7 +524,7 @@ capture_output_hep_port(CaptureManager *manager)
         CaptureOutput *output = l->data;
         if (capture_output_tech(output) == CAPTURE_TECH_HEP) {
             CaptureOutputHep *hep = CAPTURE_OUTPUT_HEP(output);
-            return hep->url.port;
+            return g_strdup_printf("%d", hep->url.port);
         }
     }
 
