@@ -145,6 +145,9 @@ capture_online(const char *dev, const char *outfile)
     capinfo->tcp_reasm = vector_create(0, 10);
     capinfo->ip_reasm = vector_create(0, 10);
 
+    // xiaoxu.shi add
+    capinfo->outpath = setting_get_value(SETTING_CAPTURE_OUTPATH);
+
     // Add this capture information as packet source
     vector_append(capture_cfg.sources, capinfo);
 
@@ -209,6 +212,9 @@ capture_offline(const char *infile, const char *outfile)
     // Create Vectors for IP and TCP reassembly
     capinfo->tcp_reasm = vector_create(0, 10);
     capinfo->ip_reasm = vector_create(0, 10);
+
+    // xiaoxu.shi add
+    capinfo->outpath = setting_get_value(SETTING_CAPTURE_OUTPATH);
 
     // Add this capture information as packet source
     vector_append(capture_cfg.sources, capinfo);
@@ -787,8 +793,7 @@ capture_packet_parse(packet_t *packet)
             packet_set_type(packet, PACKET_RTP);
             // Store this pacekt if capture rtp is enabled
             if (capture_cfg.rtp_capture) {
-                call_add_rtp_packet(stream_get_call(stream), packet);
-                return 0;
+                return call_add_rtp_packet(stream_get_call(stream), packet);
             }
         }
     }
@@ -853,7 +858,6 @@ void
 capture_thread(void *info)
 {
     capture_info_t *capinfo = (capture_info_t *) info;
-
     // Parse available packets
     pcap_loop(capinfo->handle, -1, parse_packet, (u_char *) capinfo);
     capinfo->running = false;

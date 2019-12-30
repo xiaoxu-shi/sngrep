@@ -65,6 +65,7 @@ usage()
            "    -d --device\t\t Use this capture device instead of default\n"
            "    -I --input\t\t Read captured data from pcap file\n"
            "    -O --output\t\t Write captured data to pcap file\n"
+           "    -P --outpath\t\t Write captured data to pcap path\n"
            "    -c --calls\t\t Only display dialogs starting with INVITE\n"
            "    -r --rtp\t\t Capture RTP packets payload\n"
            "    -l --limit\t\t Set capture limit to N dialogs\n"
@@ -144,6 +145,7 @@ main(int argc, char* argv[])
         { "device", required_argument, 0, 'd' },
         { "input", required_argument, 0, 'I' },
         { "output", required_argument, 0, 'O' },
+        { "outpath", required_argument, 0, 'P' }, /* xiaoxu.shi add*/
 #if defined(WITH_GNUTLS) || defined(WITH_OPENSSL)
         { "keyfile", required_argument, 0, 'k' },
 #endif
@@ -166,7 +168,7 @@ main(int argc, char* argv[])
 
     // Parse command line arguments that have high priority
     opterr = 0;
-    char *options = "hVd:I:O:pqtW:k:crl:ivNqDL:H:Rf:F";
+    char *options = "hVd:I:O:P:pqtW:k:crl:ivNqDL:H:Rf:F";
     while ((opt = getopt_long(argc, argv, options, long_options, &idx)) != -1) {
         switch (opt) {
             case 'h':
@@ -215,6 +217,9 @@ main(int argc, char* argv[])
                 break;
             case 'O':
                 outfile = optarg;
+                break;
+            case 'P': /* xiaoxu.shi add */
+                setting_set_value(SETTING_CAPTURE_OUTPATH, optarg);
                 break;
             case 'l':
                 if(!(limit = atoi(optarg))) {

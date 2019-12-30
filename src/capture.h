@@ -181,6 +181,8 @@ struct capture_info
     vector_t *tcp_reasm;
     //! Capture thread for online capturing
     pthread_t capture_t;
+    //! xiaoxu.shi add : storage of pcap files.
+    const char *outpath;
 };
 
 /**

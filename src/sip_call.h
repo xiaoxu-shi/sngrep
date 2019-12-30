@@ -90,6 +90,10 @@ struct sip_call {
     vector_t *streams;
     //! RTP packets for this call (capture_packet_t *)
     vector_t *rtp_packets;
+    //! xiaoxu.shi add : pcap file path
+    char *pd_file;
+    //! xiaoxu.shi add : pcap file handler
+    pcap_dumper_t *pd;
 };
 
 /**
@@ -165,7 +169,7 @@ call_add_stream(sip_call_t *call, rtp_stream_t *stream);
  * @param call pointer to the call owner of the stream
  * @param packet new RTP packet from call rtp streams
  */
-void
+int
 call_add_rtp_packet(sip_call_t *call, packet_t *packet);
 
 /**

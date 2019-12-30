@@ -37,6 +37,7 @@ sip_call_t *
 call_create(char *callid, char *xcallid)
 {
     sip_call_t *call;
+    const char *pd_path = setting_get_value(SETTING_CAPTURE_OUTPATH);
 
     // Initialize a new call structure
     if (!(call = sng_malloc(sizeof(sip_call_t))))
@@ -65,6 +66,17 @@ call_create(char *callid, char *xcallid)
     // Set message callid
     call->callid = strdup(callid);
     call->xcallid = strdup(xcallid);
+    // xiaoxu.shi add : open pcap file
+    if (pd_path != NULL && strlen(pd_path) > 0) {
+        call->pd_file = sng_malloc(MAX_SETTING_LEN);
+        snprintf(call->pd_file, MAX_SETTING_LEN, "%s/%s.pcap", pd_path, callid);
+        if (!call->pd) {
+            if ((call->pd = dump_open(call->pd_file)) == NULL) {
+                fprintf(stderr, "Couldn't open output dump file %s\n", call->pd_file);
+                return NULL;
+            }
+         }
+    }
 
     return call;
 }
@@ -84,6 +96,9 @@ call_destroy(sip_call_t *call)
     sng_free(call->callid);
     sng_free(call->xcallid);
     sng_free(call->reasontxt);
+    // xiaoxu.shi add
+    dump_close(call->pd);
+    sng_free(call->pd_file);
     sng_free(call);
 }
 
@@ -108,6 +123,10 @@ call_add_message(sip_call_t *call, sip_msg_t *msg)
     msg->index = vector_append(call->msgs, msg);
     // Flag this call as changed
     call->changed = true;
+    // xiaoxu.shi add : dump to pcap
+    if (call->pd) {
+        dump_packet(call->pd, msg->packet);
+    }
 }
 
 void
@@ -119,13 +138,20 @@ call_add_stream(sip_call_t *call, rtp_stream_t *stream)
     call->changed = true;
 }
 
-void
+int
 call_add_rtp_packet(sip_call_t *call, packet_t *packet)
 {
-    // Store packet
-    vector_append(call->rtp_packets, packet);
     // Flag this call as changed
     call->changed = true;
+    // xiaoxu.shi add : dump to pcap
+    if (call->pd) {
+        dump_packet(call->pd, packet);
+        return 2;
+    } else {
+        // Store packet
+        vector_append(call->rtp_packets, packet);
+        return 0;
+    }
 }
 
 int
